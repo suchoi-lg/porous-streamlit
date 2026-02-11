@@ -546,273 +546,273 @@ if st.session_state.get('calculated', False) and hasattr(st.session_state, 'anal
     else:
         # Invasion Percolation Curve
         if pnm_bpp and 'invasion_curve' in pnm_bpp:
-        st.subheader("💧 Invasion Percolation Curve")
-        
-        invasion_data = np.array(pnm_bpp['invasion_curve'])
-        pressures_bar = invasion_data[:, 0] * 1e-5
-        saturations = invasion_data[:, 1]
-        
-        fig_invasion = go.Figure()
-        fig_invasion.add_trace(go.Scatter(
-            x=saturations * 100,
-            y=pressures_bar,
-            mode='lines',
-            name='Invasion Curve',
-            line=dict(color='steelblue', width=2)
-        ))
-        
-        # Mark breakthrough point
-        fig_invasion.add_trace(go.Scatter(
-            x=[saturations[-1] * 100],
-            y=[pnm_bpp['bpp_bar']],
-            mode='markers',
-            name='Breakthrough',
-            marker=dict(color='red', size=12, symbol='star')
-        ))
-        
-        fig_invasion.update_layout(
-            title="Invasion Percolation: Capillary Pressure vs Gas Saturation",
-            xaxis_title="Gas Saturation (%)",
-            yaxis_title="Capillary Pressure (bar)",
-            showlegend=True,
-            height=500
-        )
-        st.plotly_chart(fig_invasion, use_container_width=True)
-    
-    # Invasion Percolation Animation
-    if pnm_bpp and 'invasion_frames' in pnm_bpp:
-        st.subheader("🎬 Invasion Percolation Animation (X-Z Side View)")
-        
-        frames = pnm_bpp['invasion_frames']
-        
-        # Create frames for animation
-        fig_frames = []
-        
-        # Select middle Y-slice for X-Z visualization (side view)
-        y_coords = pnm.coords[:, 1]
-        y_mid = pnm.rve_size / 2
-        # Adaptive tolerance based on pore density
-        y_tolerance = pnm.rve_size / max(10, int(pnm.n_pores ** (1/3) / 2))
-        slice_mask = np.abs(y_coords - y_mid) < y_tolerance
-        slice_pores = np.where(slice_mask)[0]
-        
-        z_coords = pnm.coords[:, 2]
-        
-        for frame_idx, frame in enumerate(frames):
-            invaded = frame['invaded_pores']
+            st.subheader("💧 Invasion Percolation Curve")
             
-            # Pore colors: red (invaded), blue (uninvaded), green (inlet), yellow (outlet)
-            colors = []
-            for p in slice_pores:
-                if p in invaded:
-                    colors.append('red')
-                elif z_coords[p] < pnm.rve_size * 0.1:
-                    colors.append('green')
-                elif z_coords[p] > pnm.rve_size * 0.9:
-                    colors.append('yellow')
-                else:
-                    colors.append('lightblue')
+            invasion_data = np.array(pnm_bpp['invasion_curve'])
+            pressures_bar = invasion_data[:, 0] * 1e-5
+            saturations = invasion_data[:, 1]
             
-            # Reduce marker size
-            sizes = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
-            
-            x_coords_slice = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X axis
-            z_coords_slice = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z axis (flow direction)
-            
-            # Create scatter plot for this frame
-            trace = go.Scatter(
-                x=x_coords_slice,
-                y=z_coords_slice,
-                mode='markers',
-                marker=dict(
-                    size=sizes,
-                    color=colors,
-                    line=dict(width=1, color='black')
-                ),
-                text=[f"Pore {p}" for p in slice_pores],
-                hoverinfo='text'
-            )
-            
-            # Add throats
-            throat_x = []
-            throat_z = []
-            for i, j in pnm.throats:
-                if i in slice_pores and j in slice_pores:
-                    throat_x.extend([pnm.coords[i, 0] * 1e6, pnm.coords[j, 0] * 1e6, None])
-                    throat_z.extend([pnm.coords[i, 2] * 1e6, pnm.coords[j, 2] * 1e6, None])
-            
-            throat_trace = go.Scatter(
-                x=throat_x,
-                y=throat_z,
+            fig_invasion = go.Figure()
+            fig_invasion.add_trace(go.Scatter(
+                x=saturations * 100,
+                y=pressures_bar,
                 mode='lines',
-                line=dict(color='gray', width=0.5),
-                hoverinfo='skip',
-                showlegend=False
-            )
+                name='Invasion Curve',
+                line=dict(color='steelblue', width=2)
+            ))
             
-            frame_data = go.Frame(
-                data=[throat_trace, trace],
-                name=str(frame_idx),
-                layout=go.Layout(
-                    title=f"Invasion Step {frame['step']}<br>P = {frame['pressure']*1e-5:.3f} bar, Saturation = {frame['saturation']*100:.1f}%"
-                )
+            # Mark breakthrough point
+            fig_invasion.add_trace(go.Scatter(
+                x=[saturations[-1] * 100],
+                y=[pnm_bpp['bpp_bar']],
+                mode='markers',
+                name='Breakthrough',
+                marker=dict(color='red', size=12, symbol='star')
+            ))
+            
+            fig_invasion.update_layout(
+                title="Invasion Percolation: Capillary Pressure vs Gas Saturation",
+                xaxis_title="Gas Saturation (%)",
+                yaxis_title="Capillary Pressure (bar)",
+                showlegend=True,
+                height=500
             )
-            fig_frames.append(frame_data)
+            st.plotly_chart(fig_invasion, use_container_width=True)
         
-        # Initial frame
-        initial_invaded = frames[0]['invaded_pores']
-        colors_init = []
-        for p in slice_pores:
-            if p in initial_invaded:
-                colors_init.append('red')
-            elif z_coords[p] < pnm.rve_size * 0.1:
-                colors_init.append('green')
-            elif z_coords[p] > pnm.rve_size * 0.9:
-                colors_init.append('yellow')
-            else:
-                colors_init.append('lightblue')
-        
-        sizes_init = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
-        x_init = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X
-        z_init = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z (flow direction)
-        
-        # Throats
-        throat_x_init = []
-        throat_z_init = []
-        for i, j in pnm.throats:
-            if i in slice_pores and j in slice_pores:
-                throat_x_init.extend([pnm.coords[i, 0] * 1e6, pnm.coords[j, 0] * 1e6, None])
-                throat_z_init.extend([pnm.coords[i, 2] * 1e6, pnm.coords[j, 2] * 1e6, None])
-        
-        fig_anim = go.Figure(
-            data=[
-                go.Scatter(
-                    x=throat_x_init,
-                    y=throat_z_init,
+        # Invasion Percolation Animation
+        if pnm_bpp and 'invasion_frames' in pnm_bpp:
+            st.subheader("🎬 Invasion Percolation Animation (X-Z Side View)")
+            
+            frames = pnm_bpp['invasion_frames']
+            
+            # Create frames for animation
+            fig_frames = []
+            
+            # Select middle Y-slice for X-Z visualization (side view)
+            y_coords = pnm.coords[:, 1]
+            y_mid = pnm.rve_size / 2
+            # Adaptive tolerance based on pore density
+            y_tolerance = pnm.rve_size / max(10, int(pnm.n_pores ** (1/3) / 2))
+            slice_mask = np.abs(y_coords - y_mid) < y_tolerance
+            slice_pores = np.where(slice_mask)[0]
+            
+            z_coords = pnm.coords[:, 2]
+            
+            for frame_idx, frame in enumerate(frames):
+                invaded = frame['invaded_pores']
+                
+                # Pore colors: red (invaded), blue (uninvaded), green (inlet), yellow (outlet)
+                colors = []
+                for p in slice_pores:
+                    if p in invaded:
+                        colors.append('red')
+                    elif z_coords[p] < pnm.rve_size * 0.1:
+                        colors.append('green')
+                    elif z_coords[p] > pnm.rve_size * 0.9:
+                        colors.append('yellow')
+                    else:
+                        colors.append('lightblue')
+                
+                # Reduce marker size
+                sizes = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
+                
+                x_coords_slice = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X axis
+                z_coords_slice = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z axis (flow direction)
+                
+                # Create scatter plot for this frame
+                trace = go.Scatter(
+                    x=x_coords_slice,
+                    y=z_coords_slice,
+                    mode='markers',
+                    marker=dict(
+                        size=sizes,
+                        color=colors,
+                        line=dict(width=1, color='black')
+                    ),
+                    text=[f"Pore {p}" for p in slice_pores],
+                    hoverinfo='text'
+                )
+                
+                # Add throats
+                throat_x = []
+                throat_z = []
+                for i, j in pnm.throats:
+                    if i in slice_pores and j in slice_pores:
+                        throat_x.extend([pnm.coords[i, 0] * 1e6, pnm.coords[j, 0] * 1e6, None])
+                        throat_z.extend([pnm.coords[i, 2] * 1e6, pnm.coords[j, 2] * 1e6, None])
+                
+                throat_trace = go.Scatter(
+                    x=throat_x,
+                    y=throat_z,
                     mode='lines',
                     line=dict(color='gray', width=0.5),
                     hoverinfo='skip',
                     showlegend=False
-                ),
-                go.Scatter(
-                    x=x_init,
-                    y=z_init,
-                    mode='markers',
-                    marker=dict(
-                        size=sizes_init,
-                        color=colors_init,
-                        line=dict(width=1, color='black')
-                    ),
-                    showlegend=False
                 )
-            ],
-            frames=fig_frames,
-            layout=go.Layout(
-                title=f"Invasion Step 0<br>P = {frames[0]['pressure']*1e-5:.3f} bar, Saturation = {frames[0]['saturation']*100:.1f}%",
-                xaxis=dict(title="X (μm)", scaleanchor="y", scaleratio=1),
-                yaxis=dict(title="Z (μm) - Flow Direction →"),
-                updatemenus=[{
-                    'type': 'buttons',
-                    'showactive': False,
-                    'buttons': [
-                        {
-                            'label': 'Play',
-                            'method': 'animate',
-                            'args': [None, {
-                                'frame': {'duration': 100, 'redraw': True},
-                                'fromcurrent': True,
-                                'mode': 'immediate',
-                                'transition': {'duration': 50}
-                            }]
-                        },
-                        {
-                            'label': 'Pause',
-                            'method': 'animate',
-                            'args': [[None], {
-                                'frame': {'duration': 0, 'redraw': False},
-                                'mode': 'immediate',
-                                'transition': {'duration': 0}
-                            }]
-                        }
-                    ]
-                }],
-                sliders=[{
-                    'steps': [
-                        {
-                            'args': [[f.name], {
-                                'frame': {'duration': 0, 'redraw': True},
-                                'mode': 'immediate',
-                                'transition': {'duration': 0}
-                            }],
-                            'label': str(i),
-                            'method': 'animate'
-                        }
-                        for i, f in enumerate(fig_frames)
-                    ],
-                    'active': 0,
-                    'y': 0,
-                    'len': 0.9,
-                    'x': 0.1,
-                    'xanchor': 'left',
-                    'yanchor': 'top'
-                }],
-                height=600
+                
+                frame_data = go.Frame(
+                    data=[throat_trace, trace],
+                    name=str(frame_idx),
+                    layout=go.Layout(
+                        title=f"Invasion Step {frame['step']}<br>P = {frame['pressure']*1e-5:.3f} bar, Saturation = {frame['saturation']*100:.1f}%"
+                    )
+                )
+                fig_frames.append(frame_data)
+            
+            # Initial frame
+            initial_invaded = frames[0]['invaded_pores']
+            colors_init = []
+            for p in slice_pores:
+                if p in initial_invaded:
+                    colors_init.append('red')
+                elif z_coords[p] < pnm.rve_size * 0.1:
+                    colors_init.append('green')
+                elif z_coords[p] > pnm.rve_size * 0.9:
+                    colors_init.append('yellow')
+                else:
+                    colors_init.append('lightblue')
+            
+            sizes_init = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
+            x_init = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X
+            z_init = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z (flow direction)
+            
+            # Throats
+            throat_x_init = []
+            throat_z_init = []
+            for i, j in pnm.throats:
+                if i in slice_pores and j in slice_pores:
+                    throat_x_init.extend([pnm.coords[i, 0] * 1e6, pnm.coords[j, 0] * 1e6, None])
+                    throat_z_init.extend([pnm.coords[i, 2] * 1e6, pnm.coords[j, 2] * 1e6, None])
+            
+            fig_anim = go.Figure(
+                data=[
+                    go.Scatter(
+                        x=throat_x_init,
+                        y=throat_z_init,
+                        mode='lines',
+                        line=dict(color='gray', width=0.5),
+                        hoverinfo='skip',
+                        showlegend=False
+                    ),
+                    go.Scatter(
+                        x=x_init,
+                        y=z_init,
+                        mode='markers',
+                        marker=dict(
+                            size=sizes_init,
+                            color=colors_init,
+                            line=dict(width=1, color='black')
+                        ),
+                        showlegend=False
+                    )
+                ],
+                frames=fig_frames,
+                layout=go.Layout(
+                    title=f"Invasion Step 0<br>P = {frames[0]['pressure']*1e-5:.3f} bar, Saturation = {frames[0]['saturation']*100:.1f}%",
+                    xaxis=dict(title="X (μm)", scaleanchor="y", scaleratio=1),
+                    yaxis=dict(title="Z (μm) - Flow Direction →"),
+                    updatemenus=[{
+                        'type': 'buttons',
+                        'showactive': False,
+                        'buttons': [
+                            {
+                                'label': 'Play',
+                                'method': 'animate',
+                                'args': [None, {
+                                    'frame': {'duration': 100, 'redraw': True},
+                                    'fromcurrent': True,
+                                    'mode': 'immediate',
+                                    'transition': {'duration': 50}
+                                }]
+                            },
+                            {
+                                'label': 'Pause',
+                                'method': 'animate',
+                                'args': [[None], {
+                                    'frame': {'duration': 0, 'redraw': False},
+                                    'mode': 'immediate',
+                                    'transition': {'duration': 0}
+                                }]
+                            }
+                        ]
+                    }],
+                    sliders=[{
+                        'steps': [
+                            {
+                                'args': [[f.name], {
+                                    'frame': {'duration': 0, 'redraw': True},
+                                    'mode': 'immediate',
+                                    'transition': {'duration': 0}
+                                }],
+                                'label': str(i),
+                                'method': 'animate'
+                            }
+                            for i, f in enumerate(fig_frames)
+                        ],
+                        'active': 0,
+                        'y': 0,
+                        'len': 0.9,
+                        'x': 0.1,
+                        'xanchor': 'left',
+                        'yanchor': 'top'
+                    }],
+                    height=600
+                )
             )
-        )
-        
-        st.plotly_chart(fig_anim, use_container_width=True)
-        
-        st.info("🟢 초록색 = 입구 (z=0, 하단), 🟡 노란색 = 출구 (z=thickness, 상단), 🔴 빨간색 = 기체 침투, 🔵 파란색 = 전해질 포화\n\n**X-Z 단면도** (Side View): 기체가 아래(초록)에서 위(노랑)로 침투")
-        
-        # Pore Size Distribution
-        fig_psd = go.Figure()
-        pore_sizes_nm = pnm.pore_diameters * 1e9  # m to nm
-        fig_psd.add_trace(go.Histogram(
-            x=pore_sizes_nm,
-            nbinsx=30,
-            name="Pore Sizes",
-            marker_color='steelblue'
-        ))
-        fig_psd.update_layout(
-            title="Pore Size Distribution",
-            xaxis_title="Pore Diameter (nm)",
-            yaxis_title="Count",
-            showlegend=False,
-            height=400
-        )
-        st.plotly_chart(fig_psd, use_container_width=True)
-        
-        # Network Structure
-        st.subheader("🕸️ Network Structure (X-Z Side View)")
-        fig_net, ax = plt.subplots(figsize=(10, 10))
-        
-        # Select pores in middle Y-slice for X-Z view
-        y_coords_viz = pnm.coords[:, 1]
-        y_mid = pnm.rve_size / 2
-        y_tolerance = pnm.rve_size / max(10, int(pnm.n_pores ** (1/3) / 2))
-        slice_pores_viz = np.where(np.abs(y_coords_viz - y_mid) < y_tolerance)[0]
-        
-        # Plot throats in slice
-        for throat_idx, (i, j) in enumerate(pnm.throats):
-            if i in slice_pores_viz and j in slice_pores_viz:
-                xi = pnm.coords[i, 0]
-                zi = pnm.coords[i, 2]
-                xj = pnm.coords[j, 0]
-                zj = pnm.coords[j, 2]
-                ax.plot([xi * 1e6, xj * 1e6], [zi * 1e6, zj * 1e6], 'k-', alpha=0.3, linewidth=0.5)
-        
-        # Plot pores in slice
-        for pore_id in slice_pores_viz:
-            x = pnm.coords[pore_id, 0]
-            z = pnm.coords[pore_id, 2]
-            d = pnm.pore_diameters[pore_id] * 1e9  # to nm
-            ax.scatter(x * 1e6, z * 1e6, s=d*0.5, c='steelblue', alpha=0.6, edgecolors='black', linewidth=0.5)
-        
-        ax.set_xlabel("X (μm)")
-        ax.set_ylabel("Z (μm) - Flow Direction →")
-        ax.set_aspect('equal')
-        ax.grid(True, alpha=0.3)
-        st.pyplot(fig_net)
+            
+            st.plotly_chart(fig_anim, use_container_width=True)
+            
+            st.info("🟢 초록색 = 입구 (z=0, 하단), 🟡 노란색 = 출구 (z=thickness, 상단), 🔴 빨간색 = 기체 침투, 🔵 파란색 = 전해질 포화\n\n**X-Z 단면도** (Side View): 기체가 아래(초록)에서 위(노랑)로 침투")
+            
+            # Pore Size Distribution
+            fig_psd = go.Figure()
+            pore_sizes_nm = pnm.pore_diameters * 1e9  # m to nm
+            fig_psd.add_trace(go.Histogram(
+                x=pore_sizes_nm,
+                nbinsx=30,
+                name="Pore Sizes",
+                marker_color='steelblue'
+            ))
+            fig_psd.update_layout(
+                title="Pore Size Distribution",
+                xaxis_title="Pore Diameter (nm)",
+                yaxis_title="Count",
+                showlegend=False,
+                height=400
+            )
+            st.plotly_chart(fig_psd, use_container_width=True)
+            
+            # Network Structure
+            st.subheader("🕸️ Network Structure (X-Z Side View)")
+            fig_net, ax = plt.subplots(figsize=(10, 10))
+            
+            # Select pores in middle Y-slice for X-Z view
+            y_coords_viz = pnm.coords[:, 1]
+            y_mid = pnm.rve_size / 2
+            y_tolerance = pnm.rve_size / max(10, int(pnm.n_pores ** (1/3) / 2))
+            slice_pores_viz = np.where(np.abs(y_coords_viz - y_mid) < y_tolerance)[0]
+            
+            # Plot throats in slice
+            for throat_idx, (i, j) in enumerate(pnm.throats):
+                if i in slice_pores_viz and j in slice_pores_viz:
+                    xi = pnm.coords[i, 0]
+                    zi = pnm.coords[i, 2]
+                    xj = pnm.coords[j, 0]
+                    zj = pnm.coords[j, 2]
+                    ax.plot([xi * 1e6, xj * 1e6], [zi * 1e6, zj * 1e6], 'k-', alpha=0.3, linewidth=0.5)
+            
+            # Plot pores in slice
+            for pore_id in slice_pores_viz:
+                x = pnm.coords[pore_id, 0]
+                z = pnm.coords[pore_id, 2]
+                d = pnm.pore_diameters[pore_id] * 1e9  # to nm
+                ax.scatter(x * 1e6, z * 1e6, s=d*0.5, c='steelblue', alpha=0.6, edgecolors='black', linewidth=0.5)
+            
+            ax.set_xlabel("X (μm)")
+            ax.set_ylabel("Z (μm) - Flow Direction →")
+            ax.set_aspect('equal')
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig_net)
     
     # Comparison table
     st.header("📋 비교표")
