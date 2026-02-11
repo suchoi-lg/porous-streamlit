@@ -21,12 +21,12 @@ st.sidebar.header("📊 입력 파라미터")
 
 st.sidebar.subheader("1️⃣ Pore Structure")
 porosity = st.sidebar.slider("Porosity (ε)", 0.1, 0.9, 0.4, 0.01)
-mean_pore_size = st.sidebar.number_input("Mean Pore Diameter (nm)", 10.0, 10000.0, 500.0, 10.0)
-pore_std = st.sidebar.number_input("Pore Size Std Dev (nm)", 1.0, 5000.0, 100.0, 10.0,
+mean_pore_size = st.sidebar.number_input("Mean Pore Diameter (nm)", 10.0, 10000.0, 100.0, 10.0,
+                                         help="추천: RVE size / 100")
+pore_std = st.sidebar.number_input("Pore Size Std Dev (nm)", 1.0, 5000.0, 10.0, 10.0,
                                    help="표준편차: 값이 클수록 pore 크기 분포가 넓음")
-thickness = st.sidebar.number_input("Membrane Thickness (μm)", 10.0, 1000.0, 100.0, 10.0)
-rve_size = st.sidebar.number_input("RVE Lateral Size (μm)", 10.0, 500.0, 100.0, 10.0,
-                                   help="Representative Volume Element - 계산 영역 크기 (권장: thickness와 비슷하게)")
+thickness = st.sidebar.number_input("Membrane Thickness (μm)", 10.0, 1000.0, 100.0, 10.0,
+                                   help="실제 멤브레인 두께 (최종 property scaling용)")
 
 st.sidebar.subheader("2️⃣ Electrolyte Properties")
 bulk_conductivity = st.sidebar.number_input("Bulk Ionic Conductivity (S/cm)", 0.01, 2.0, 0.8, 0.01, 
@@ -42,8 +42,9 @@ st.sidebar.subheader("4️⃣ PNM Settings")
 enable_pnm = st.sidebar.checkbox("PNM 시뮬레이션 실행", value=True,
                                  help="체크 해제하면 해석 모델만 계산 (빠름)")
 if enable_pnm:
-    max_pores = st.sidebar.number_input("최대 Pore 개수", 1000, 50000, 15000, 1000,
-                                       help="많을수록 정확하지만 느림. 권장: 10,000-20,000")
+    rve_size = st.sidebar.number_input("RVE Size (μm)", 1.0, 100.0, 10.0, 0.5,
+                                       help="추천: Mean pore의 100~1000배")
+    st.sidebar.markdown("*Pore 개수는 자동 계산됩니다*")
 
 st.sidebar.markdown("---")
 run_calculation = st.sidebar.button("🚀 Run Calculation", type="primary", use_container_width=True)
@@ -53,7 +54,10 @@ thickness_m = thickness * 1e-6  # μm to m
 thickness_cm = thickness * 1e-4  # μm to cm
 mean_pore_m = mean_pore_size * 1e-9  # nm to m
 pore_std_m = pore_std * 1e-9  # nm to m
-rve_size_m = rve_size * 1e-6  # μm to m
+if enable_pnm:
+    rve_size_m = rve_size * 1e-6  # μm to m
+else:
+    rve_size_m = 50e-6  # Default for analytical only
 surface_tension_N = surface_tension * 1e-3  # mN/m to N/m
 contact_angle_rad = np.radians(contact_angle)
 viscosity_Pa_s = electrolyte_viscosity * 1e-3  # mPa·s to Pa·s
@@ -131,7 +135,7 @@ def calculate_analytical_models():
 # ============================================================================
 
 class PoreNetworkModel:
-    def __init__(self, size, porosity, mean_pore, pore_std, thickness, rve_size, coord_num, max_pores=15000):
+    def __init__(self, size, porosity, mean_pore, pore_std, thickness, rve_size, coord_num):
         self.size = size
         self.target_porosity = porosity
         self.mean_pore = mean_pore
@@ -139,8 +143,8 @@ class PoreNetworkModel:
         self.thickness = thickness
         self.rve_size = rve_size
         self.coord_num = coord_num
-        self.max_pores = max_pores
         
+
         # Calculate required number of pores to match porosity
         self.n_pores = self.calculate_n_pores()
         
@@ -155,11 +159,16 @@ class PoreNetworkModel:
         # Required total pore volume
         required_pore_volume = self.target_porosity * rve_volume
         
-        # Number of pores (with overlap factor ~1.5 to account for connectivity)
-        n_pores = int(required_pore_volume / mean_pore_volume * 1.5)
+        # Number of pores
+        # Note: No overlap factor needed for Voronoi (pores don't overlap)
+        # But sphere approximation underestimates, so use 1.2x factor
+        n_pores_needed = int(required_pore_volume / mean_pore_volume * 1.2)
         
         # Ensure minimum and maximum limits
-        n_pores = max(1000, min(n_pores, self.max_pores))
+        n_pores = max(1000, n_pores_needed)
+        self.pore_count_warning = (n_pores > 20000)
+
+        # Store warning if severely limited
         
         return n_pores
     
@@ -252,28 +261,34 @@ class PoreNetworkModel:
         
         G_internal = G[internal_pores][:, internal_pores].tocsr()
         
+        # Current injection - VECTORIZED VERSION (much faster!)
         I = np.zeros(len(internal_pores))
         
-        for idx, pore in enumerate(internal_pores):
-            for throat_idx, (i, j) in enumerate(self.throats):
-                if i == pore and j in inlet_pores:
-                    I[idx] += conductances[throat_idx] * 1.0
-                elif j == pore and i in inlet_pores:
-                    I[idx] += conductances[throat_idx] * 1.0
+        # Find throats connecting internal pores to inlet pores
+        inlet_set = set(inlet_pores)
+        internal_dict = {pore: idx for idx, pore in enumerate(internal_pores)}
+        
+        for throat_idx, (i, j) in enumerate(self.throats):
+            if i in internal_dict and j in inlet_set:
+                I[internal_dict[i]] += conductances[throat_idx] * 1.0
+            elif j in internal_dict and i in inlet_set:
+                I[internal_dict[j]] += conductances[throat_idx] * 1.0
         
         try:
             V_internal = linalg.spsolve(G_internal, I)
         except:
             return None
         
+        # Calculate total current - OPTIMIZED
         total_current = 0
+        inlet_set = set(inlet_pores)
+        internal_dict = {pore: idx for idx, pore in enumerate(internal_pores)}
+        
         for throat_idx, (i, j) in enumerate(self.throats):
-            if i in inlet_pores and j in internal_pores:
-                j_internal_idx = np.where(internal_pores == j)[0][0]
-                total_current += conductances[throat_idx] * (1.0 - V_internal[j_internal_idx])
-            elif j in inlet_pores and i in internal_pores:
-                i_internal_idx = np.where(internal_pores == i)[0][0]
-                total_current += conductances[throat_idx] * (1.0 - V_internal[i_internal_idx])
+            if i in inlet_set and j in internal_dict:
+                total_current += conductances[throat_idx] * (1.0 - V_internal[internal_dict[j]])
+            elif j in inlet_set and i in internal_dict:
+                total_current += conductances[throat_idx] * (1.0 - V_internal[internal_dict[i]])
         
         area = self.rve_size ** 2  # Cross-sectional area
         delta_V = 1.0
@@ -316,28 +331,33 @@ class PoreNetworkModel:
         
         G_internal = G[internal_pores][:, internal_pores].tocsr()
         
+        # Flow injection - VECTORIZED
         Q = np.zeros(len(internal_pores))
         
-        for idx, pore in enumerate(internal_pores):
-            for throat_idx, (i, j) in enumerate(self.throats):
-                if i == pore and j in inlet_pores:
-                    Q[idx] += hydraulic_conductances[throat_idx] * 1.0
-                elif j == pore and i in inlet_pores:
-                    Q[idx] += hydraulic_conductances[throat_idx] * 1.0
+        inlet_set = set(inlet_pores)
+        internal_dict = {pore: idx for idx, pore in enumerate(internal_pores)}
+        
+        for throat_idx, (i, j) in enumerate(self.throats):
+            if i in internal_dict and j in inlet_set:
+                Q[internal_dict[i]] += hydraulic_conductances[throat_idx] * 1.0
+            elif j in internal_dict and i in inlet_set:
+                Q[internal_dict[j]] += hydraulic_conductances[throat_idx] * 1.0
         
         try:
             P_internal = linalg.spsolve(G_internal, Q)
         except:
             return None
         
+        # Calculate total flow - OPTIMIZED
         total_flow = 0
+        inlet_set = set(inlet_pores)
+        internal_dict = {pore: idx for idx, pore in enumerate(internal_pores)}
+        
         for throat_idx, (i, j) in enumerate(self.throats):
-            if i in inlet_pores and j in internal_pores:
-                j_internal_idx = np.where(internal_pores == j)[0][0]
-                total_flow += hydraulic_conductances[throat_idx] * (1.0 - P_internal[j_internal_idx])
-            elif j in inlet_pores and i in internal_pores:
-                i_internal_idx = np.where(internal_pores == i)[0][0]
-                total_flow += hydraulic_conductances[throat_idx] * (1.0 - P_internal[i_internal_idx])
+            if i in inlet_set and j in internal_dict:
+                total_flow += hydraulic_conductances[throat_idx] * (1.0 - P_internal[internal_dict[j]])
+            elif j in inlet_set and i in internal_dict:
+                total_flow += hydraulic_conductances[throat_idx] * (1.0 - P_internal[internal_dict[i]])
         
         area = self.rve_size ** 2
         delta_P = 1.0
@@ -431,8 +451,7 @@ if run_calculation:
                 pore_std=pore_std_m,
                 thickness=thickness_m,
                 rve_size=rve_size_m,
-                coord_num=None,
-                max_pores=max_pores
+                coord_num=None
             )
             progress_bar.progress(30)
             
@@ -475,11 +494,15 @@ if st.session_state.get('calculated', False) and hasattr(st.session_state, 'anal
     
     # Display porosity info only if PNM was run
     if pnm is not None:
-        st.info(f"**PNM 정보**\n\n"
-                f"- Pore 개수: {pnm.n_pores:,}개\n"
-                f"- 실제 Porosity: {pnm.actual_porosity:.3f} (목표: {porosity:.3f})\n"
-                f"- 오차: {abs(pnm.actual_porosity - porosity)/porosity*100:.1f}%\n\n"
-                f"*Note: Sphere volume 기준, overlap 무시*")
+        porosity_error = abs(pnm.actual_porosity - porosity) / porosity * 100
+        
+        if pnm.pore_count_warning:
+            st.warning(f"⚠️ **계산 시간 경고**\n\nPore 개수: {pnm.n_pores:,}개 - 계산 시간 약 {pnm.n_pores//1000}분 예상")
+
+        if porosity_error > 20:
+            st.warning(f"**PNM 정보**\n\n- Pore 개수: {pnm.n_pores:,}개\n- 실제 Porosity: {pnm.actual_porosity:.3f} (목표: {porosity:.3f})\n- 오차: {porosity_error:.1f}%")
+        else:
+            st.info(f"**PNM 정보**\n\n- Pore 개수: {pnm.n_pores:,}개\n- 실제 Porosity: {pnm.actual_porosity:.3f} (목표: {porosity:.3f})\n- 오차: {porosity_error:.1f}%")
     
     st.header("📊 계산 결과")
     
@@ -614,10 +637,10 @@ if st.session_state.get('calculated', False) and hasattr(st.session_state, 'anal
                         colors.append('lightblue')
                 
                 # Reduce marker size
-                sizes = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
+                sizes = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]
                 
-                x_coords_slice = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X axis
-                z_coords_slice = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z axis (flow direction)
+                x_coords_slice = [pnm.coords[p, 0] * 1e6 for p in slice_pores]
+                z_coords_slice = [pnm.coords[p, 2] * 1e6 for p in slice_pores]
                 
                 # Create scatter plot for this frame
                 trace = go.Scatter(
@@ -672,9 +695,9 @@ if st.session_state.get('calculated', False) and hasattr(st.session_state, 'anal
                 else:
                     colors_init.append('lightblue')
             
-            sizes_init = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]  # nm scale * 0.5
-            x_init = [pnm.coords[p, 0] * 1e6 for p in slice_pores]  # X
-            z_init = [pnm.coords[p, 2] * 1e6 for p in slice_pores]  # Z (flow direction)
+            sizes_init = [pnm.pore_diameters[p] * 1e9 * 0.5 for p in slice_pores]
+            x_init = [pnm.coords[p, 0] * 1e6 for p in slice_pores]
+            z_init = [pnm.coords[p, 2] * 1e6 for p in slice_pores]
             
             # Throats
             throat_x_init = []
@@ -763,8 +786,8 @@ if st.session_state.get('calculated', False) and hasattr(st.session_state, 'anal
             st.plotly_chart(fig_anim, use_container_width=True)
             
             st.info("🟢 초록색 = 입구 (z=0, 하단), 🟡 노란색 = 출구 (z=thickness, 상단), 🔴 빨간색 = 기체 침투, 🔵 파란색 = 전해질 포화\n\n**X-Z 단면도** (Side View): 기체가 아래(초록)에서 위(노랑)로 침투")
-            
-            # Pore Size Distribution
+        
+    # Pore Size Distribution
             fig_psd = go.Figure()
             pore_sizes_nm = pnm.pore_diameters * 1e9  # m to nm
             fig_psd.add_trace(go.Histogram(
